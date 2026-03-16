@@ -92,15 +92,9 @@ export class JiraApiService {
       }
 
       if (node.type === "text" && node.text) {
-        const matches = node.text.match(/[A-Z]+-\d+/g) || [];
-        matches.forEach((key: string) => {
-          mentions.push({
-            key,
-            type: "mention",
-            source,
-            commentId,
-          });
-        });
+        mentions.push(
+          ...this.extractIssueKeysFromText(node.text, source, commentId)
+        );
       }
 
       if (node.content) {
@@ -112,9 +106,58 @@ export class JiraApiService {
     return [...new Map(mentions.map((m) => [m.key, m])).values()];
   }
 
+  protected extractIssueKeysFromText(
+    text: string,
+    source: "description" | "comment",
+    commentId?: string
+  ): CleanJiraIssue["relatedIssues"] {
+    const matches = text.match(/[A-Z]+-\d+/g) || [];
+    return [...new Map(
+      matches.map((key) => [
+        key,
+        {
+          key,
+          type: "mention" as const,
+          source,
+          commentId,
+        },
+      ])
+    ).values()];
+  }
+
+  protected extractTextValue(
+    value?: string | { content?: any[] }
+  ): string {
+    if (typeof value === "string") {
+      return value;
+    }
+
+    if (value?.content) {
+      return this.extractTextContent(value.content);
+    }
+
+    return "";
+  }
+
+  protected extractMentionsFromValue(
+    value: string | { content?: any[] } | undefined,
+    source: "description" | "comment",
+    commentId?: string
+  ): CleanJiraIssue["relatedIssues"] {
+    if (typeof value === "string") {
+      return this.extractIssueKeysFromText(value, source, commentId);
+    }
+
+    if (value?.content) {
+      return this.extractIssueMentions(value.content, source, commentId);
+    }
+
+    return [];
+  }
+
   protected cleanComment(comment: {
     id: string;
-    body?: {
+    body?: string | {
       content?: any[];
     };
     author?: {
@@ -123,12 +166,12 @@ export class JiraApiService {
     created: string;
     updated: string;
   }): CleanComment {
-    const body = comment.body?.content
-      ? this.extractTextContent(comment.body.content)
-      : "";
-    const mentions = comment.body?.content
-      ? this.extractIssueMentions(comment.body.content, "comment", comment.id)
-      : [];
+    const body = this.extractTextValue(comment.body);
+    const mentions = this.extractMentionsFromValue(
+      comment.body,
+      "comment",
+      comment.id
+    );
 
     return {
       id: comment.id,
@@ -160,9 +203,7 @@ export class JiraApiService {
   }
 
   protected cleanIssue(issue: any): CleanJiraIssue {
-    const description = issue.fields?.description?.content
-      ? this.extractTextContent(issue.fields.description.content)
-      : "";
+    const description = this.extractTextValue(issue.fields?.description);
 
     const cleanedIssue: CleanJiraIssue = {
       id: issue.id,
@@ -175,9 +216,9 @@ export class JiraApiService {
       relatedIssues: [],
     };
 
-    if (issue.fields?.description?.content) {
-      const mentions = this.extractIssueMentions(
-        issue.fields.description.content,
+    if (issue.fields?.description) {
+      const mentions = this.extractMentionsFromValue(
+        issue.fields.description,
         "description"
       );
       if (mentions.length > 0) {
@@ -471,7 +512,11 @@ export class JiraApiService {
     filename: string
   ): Promise<{ id: string; filename: string }> {
     const formData = new FormData();
-    formData.append("file", new Blob([file]), filename);
+    const fileBuffer = file.buffer.slice(
+      file.byteOffset,
+      file.byteOffset + file.byteLength
+    ) as ArrayBuffer;
+    formData.append("file", new Blob([fileBuffer]), filename);
 
     const headers = new Headers(this.headers);
     headers.delete("Content-Type");

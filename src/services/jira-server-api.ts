@@ -1,6 +1,7 @@
 // JiraServerApiService: Jira Server (Data Center) implementation
 // This class should override methods as needed for Jira Server differences
 import { JiraApiService } from "./jira-api.js";
+import { AddCommentResponse } from "../types/jira.js";
 
 export class JiraServerApiService extends JiraApiService {
   constructor(baseUrl: string, email: string, apiToken: string, authType: 'basic' | 'bearer' = 'basic') {
@@ -22,6 +23,24 @@ export class JiraServerApiService extends JiraApiService {
     return super.fetchJson<T>(serverUrl, init);
   }
 
-  // You may need to override other methods for Jira Server quirks (e.g., ADF support, field names)
-  // Add overrides here as needed
+  override async addCommentToIssue(
+    issueIdOrKey: string,
+    body: string
+  ): Promise<AddCommentResponse> {
+    const response = await this.fetchJson<any>(
+      `/rest/api/3/issue/${issueIdOrKey}/comment`,
+      {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      }
+    );
+
+    return {
+      id: response.id,
+      author: response.author?.displayName ?? "",
+      created: response.created,
+      updated: response.updated,
+      body: this.extractTextValue(response.body),
+    };
+  }
 }
